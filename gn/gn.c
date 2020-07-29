@@ -1,66 +1,13 @@
-#include "readgml.h"
+#include "gn.h"
 #include "stdlib.h"
 #include "string.h"
 #include "math.h"
+#include <stdio.h>
 #include "time.h"
 
 #define ERROR_BOUND .0001
 
-DEL_ORDER  *delOrder;
-NETWORK    *network = NULL;
-clock_t    begin,end;
-int        delOrderSize = 0, // size of delOrder[]
-		   totalEdges = 0, 	 // total edges
-		   edgeCnt = 0, 	 // counter for edges
-		   step = 1; 	 	 // steps of the GN alg
-
-int main()
-{
-	FILE *fp;
-	int  vertexIdx;
-
-	network  = (NETWORK*) malloc(sizeof(NETWORK));
-	fp = fopen("./karate.gml", "r");
-
-	if (fp == NULL)
-	{
-	  fprintf(stderr, "Can't open input file\n");
-	  exit(1);
-	}
-
-	// parse file into NETWORK structure
-	read_network(network,fp);
-
-	// compute number of edgeCnt
-	for (vertexIdx = 0; vertexIdx < network->nvertices;vertexIdx++)
-	{
-		edgeCnt += network->vertex[vertexIdx].degree;
-	}
-
-	delOrderSize = edgeCnt;
-	delOrder = (DEL_ORDER *) malloc(delOrderSize * sizeof(DEL_ORDER));
-	edgeCnt /= 2;
-	totalEdges = edgeCnt;
-
-	printf("Nodes: %d\n", network->nvertices);
-	printf("Edges: %d\n\n", totalEdges);
-
-	while(edgeCnt > 0)
-	{
-		computeGN(0,network->nvertices);
-		handleDeletion();
-	}
-
-	printf("Nodes: %d\n", network->nvertices);
-	printf("Edges: %d\n\n", totalEdges);
-
-	end = clock();
-	printf("\nExecution time: %lf", (double)(end - begin) / CLOCKS_PER_SEC);
-	free(delOrder);
-	free_network(network);
-}
-
-void computeGN(int initIdx, int endIdx)
+void computeGN(NETWORK* network, int initIdx, int endIdx)
 {
 	VERTEXNODE *head,
 			   *tail,
@@ -73,10 +20,10 @@ void computeGN(int initIdx, int endIdx)
 	           degreeIdx,
 			   edgeIdx;
 
-
+#if _DEBUG
 	printf("Communities: \n");
-	memset(delOrder, 0, delOrderSize*sizeof(*delOrder));
-
+#endif	
+    network->ncomponents = 0;
 	for (vertexIdx = initIdx; vertexIdx < endIdx; vertexIdx++)
 	{
 		head = (VERTEXNODE *) malloc(sizeof(VERTEXNODE));
@@ -140,7 +87,9 @@ void computeGN(int initIdx, int endIdx)
 
 			if (network->vertex[head->vertexIdx].grouped == 0)
 			{
+#if _DEBUG
 				printf("%02d ", network->vertex[head->vertexIdx].id);
+#endif
 				network->vertex[head->vertexIdx].grouped = 1;
 				comDegreeTotal += network->vertex[head->vertexIdx].degree;
 				comEdgeTotal = comDegreeTotal/2;
@@ -180,22 +129,27 @@ void computeGN(int initIdx, int endIdx)
 			head = temp;
 		}
 
-		resetVertices();
+		resetVertices(network);
 
 		if(communityPrinted)
 		{
+            network->ncomponents++;
+#if _DEBUG
 			printf("\n");
-			modularity += ((double)comEdgeTotal/(double)(totalEdges)) - (square(comDegreeTotal) / (4*square(totalEdges)));
+#endif
+			modularity += ((double)comEdgeTotal/(double)(network->nedges)) - (square(comDegreeTotal) / (4*square(network->nedges)));
 			comDegreeTotal = 0;
 			comEdgeTotal = 0;
 		}
 	}
+#if _DEBUG
 	printf("\nModularity: %f\n\n", modularity);
+#endif
 }
 
 // adds flows to delOrder array. sorts and removes edgeCnt from graph
 // resets flowSum for each node
-void handleDeletion()
+void handleDeletion(NETWORK* network, DEL_ORDER* delOrder)
 {
 	int delOrderIdx,
 		vertexIdx,
@@ -209,12 +163,6 @@ void handleDeletion()
 		for (degreeIdx = 0; degreeIdx < network->vertex[vertexIdx].degree; degreeIdx++)
 		{
 			edgeIdx = network->vertex[vertexIdx].edge[degreeIdx].target;
-			// realloc size of delOrder if need be...double it to be safe...realloc is expensive...
-			if ((orderIdx + 1) > delOrderSize)
-			{
-				delOrderSize = delOrderSize*2;
-				delOrder = (DEL_ORDER *) realloc(delOrder, (delOrderSize*2) * sizeof(DEL_ORDER));
-			}
 
 			// only add the edge in 1 direction to avoid duplicates. this 'if' checks if we have already visited
 			// one of the vertices corresponding to the same edge. this could also be > if we wanted. need to simply
@@ -230,32 +178,33 @@ void handleDeletion()
 	}
 
 	// sort the edgeCnt according to cmpBtwn: highest to lowest
-	qsort(delOrder,(orderIdx),sizeof(DEL_ORDER),(void*)cmpBtwn);
+	qsort(delOrder, orderIdx, sizeof(DEL_ORDER), cmpBtwn);
 
-	printf("Step %d:\n", step);
+	
 	delOrderIdx = -1;
 	do{
 		delOrderIdx++;
 		//remove the edge from each vertex it belongs to
-		removeEdge(delOrder[delOrderIdx].vertex1Idx,delOrder[delOrderIdx].vertex2Idx);
-		removeEdge(delOrder[delOrderIdx].vertex2Idx,delOrder[delOrderIdx].vertex1Idx);
-		edgeCnt--;
-
+		removeEdge(network, delOrder[delOrderIdx].vertex1Idx,delOrder[delOrderIdx].vertex2Idx);
+		removeEdge(network, delOrder[delOrderIdx].vertex2Idx,delOrder[delOrderIdx].vertex1Idx);
+		(network->nedges)--;
+#if _DEBUG
 		printf("%02d <-> %02d = %.2f\n", network->vertex[delOrder[delOrderIdx].vertex1Idx].id,
 										 network->vertex[delOrder[delOrderIdx].vertex2Idx].id,
 										 delOrder[delOrderIdx].flow);
+#endif
 	}while(fabs(delOrder[delOrderIdx].flow - delOrder[delOrderIdx+1].flow) < ERROR_BOUND);
 
+#if _DEBUG
 	printf("\n----------------------------------------\n");
 	// we check the difference above to account for rounding errors with doubles
-	// eg 3.99999997 vs 4.0
-
-	step++;
+	// eg 3.99999997 vs 4.0	
 	printf("\n");
+#endif
 }
 
 // removes edges from vertices and shifts edge[] array left accordingly
-void removeEdge(int vIdx1, int vIdx2)
+void removeEdge(NETWORK* network, int vIdx1, int vIdx2)
 {
 	int degreeShift,
 		degreeIdx;
@@ -276,19 +225,11 @@ void removeEdge(int vIdx1, int vIdx2)
 	}
 }
 
-// compare edge flows highest to lowest
-// return 1 when e1 should be after e2
-// return -1 when e1 should be before e2
-int cmpBtwn(DEL_ORDER *e1, DEL_ORDER *e2)
-{
-	if (e1->flow < e2->flow) return 1;
-	if (e1->flow > e2->flow) return -1;
-	return 0;
-}
+
 
 // reset the vertices shortest path and visited variables for the next
 // round with a new root node
-void resetVertices()
+void resetVertices(NETWORK* network)
 {
 	int vertexIdx;
 
@@ -299,8 +240,130 @@ void resetVertices()
 	}
 }
 
-// squares a double
-double square (double x)
-{
-	return (x * x);
+// after usage of label_header, it is the user's responsibility to free the memory used
+
+void girvan_newman(NETWORK* network, LABELLIST *label_header) {
+    DEL_ORDER* delOrder;
+    int        delOrderSize; // size of delOrder[]        
+    int step = 0;
+    delOrderSize = network->nedges;
+    delOrder = (DEL_ORDER *)malloc(delOrderSize * sizeof(DEL_ORDER));
+    label_header->prev = NULL;
+    label_header->labels = calloc(network->nvertices, sizeof(int));
+    int ncomponents = get_community_structure(network, label_header->labels);
+#if _DEBUG
+    printf("Nodes: %d\n", network->nvertices);
+    printf("Edges: %d\n\n", network->nedges);
+#endif
+    while (network->nedges > 0)
+    {
+#if _DEBUG
+        printf("Step %d:\n", step);
+        step++;
+#endif
+        memset(delOrder, 0, delOrderSize * sizeof(DEL_ORDER));
+        computeGN(network, 0, network->nvertices);
+        if (ncomponents < network->ncomponents) {
+            label_header->next = malloc(sizeof(LABELLIST));
+            label_header->next->labels = calloc(network->nvertices, sizeof(int));
+            (label_header->next)->prev = label_header;
+            label_header = label_header->next;
+            ncomponents = get_community_structure(network, label_header->labels);
+        }
+        handleDeletion(network, delOrder);
+        
+    }
+    label_header->next = malloc(sizeof(LABELLIST));
+    label_header->next->labels = calloc(network->nvertices, sizeof(int));
+    (label_header->next)->prev = label_header;
+    label_header = label_header->next;
+    ncomponents = get_community_structure(network, label_header->labels);
+    label_header->next = NULL;
+
+#if _DEBUG
+    printf("Nodes: %d\n", network->nvertices);
+    printf("Edges: %d\n\n", network->nedges);
+#endif
+    free(delOrder);
+}
+
+// ncomponents is returned
+
+int get_community_structure(NETWORK* network, int* labels) {
+    VERTEXNODE *head,
+        *tail,
+        *temp;
+    int    vertexIdx,
+        degreeIdx,
+        edgeIdx;
+    int label_index = -1;
+    int initIdx = 0;
+    int endIdx = network->nvertices;    
+    int *grouped;
+    grouped = calloc(network->nvertices, sizeof(int));
+    for (vertexIdx = initIdx; vertexIdx < endIdx; vertexIdx++)
+    {
+        if (grouped[vertexIdx])
+            continue;
+        label_index++;
+        head = (VERTEXNODE *)malloc(sizeof(VERTEXNODE));
+
+        // init head to root
+        head->vertexIdx = vertexIdx;
+        // mark root visited and prime depth
+        network->vertex[head->vertexIdx].visited = 1;
+        head->prev = NULL;
+        tail = head;
+        // prevents corruption if head-next is valid when it
+        // shouldn't be
+        head->next = NULL;
+
+        while (head)
+        {
+            for (degreeIdx = 0; degreeIdx < network->vertex[head->vertexIdx].degree; degreeIdx++)
+            {
+                edgeIdx = network->vertex[head->vertexIdx].edge[degreeIdx].target;
+
+                // add nodes not visited to list
+                if (0 == network->vertex[edgeIdx].visited)
+                {
+                    tail->next = malloc(sizeof(VERTEXNODE));
+                    (tail->next)->prev = tail;
+                    tail = tail->next;
+                    tail->next = NULL;
+                    tail->vertexIdx = edgeIdx;
+
+                    // mark visited
+                    network->vertex[tail->vertexIdx].visited = 1;
+
+                }
+            }
+            head = head->next;
+        }
+
+        // go back through the list to the root node
+        head = tail;
+
+        while (head)
+        {
+            // find the separate communities. We need to mark the vertex as "grouped"
+            // so that we don't print the community as many times as it has members.
+            // aka, only print it from one community members perspective
+
+            if (grouped[head->vertexIdx] == 0)
+            {
+                labels[head->vertexIdx] = label_index;
+                grouped[head->vertexIdx] = 1;
+            }
+       
+            temp = head->prev;
+            // cleanup on the way out
+            free(head);
+            head = temp;
+        }
+
+    }
+    free(grouped);
+    resetVertices(network);
+    return label_index + 1;
 }

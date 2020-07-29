@@ -353,8 +353,10 @@ void read_edges(NETWORK *network)
 
   for (i=0; i<network->nvertices; i++) {
     network->vertex[i].edge = malloc(network->vertex[i].degree*sizeof(EDGE));
+    network->vertex[i].edge->flow = 0;
+    network->vertex[i].edge->flowSum = 0;
   }
-  count = calloc(network->nvertices,sizeof(int));
+  count = calloc(network->nvertices, sizeof(int));
 
   // Read in the data
 
@@ -408,6 +410,19 @@ void read_edges(NETWORK *network)
   return;
 }
 
+void count_edges(NETWORK* network)
+{
+    int result = 0;
+    int vertexIdx;
+    for (vertexIdx = 0; vertexIdx < network->nvertices; vertexIdx++)
+    {
+        result += network->vertex[vertexIdx].degree;
+    }
+    if (!network->directed)
+        result /= 2;
+
+    network->nedges = result;
+}
 
 // Function to read a complete network
 
@@ -417,6 +432,7 @@ int read_network(NETWORK *network, FILE *stream)
   create_network(network);
   get_degrees(network);
   read_edges(network);
+  count_edges(network);
   free_buffer();
 
   return 0;

@@ -12,10 +12,7 @@ typedef struct {
 }DEL_ORDER;
 
 int cmpBtwn(DEL_ORDER *e1, DEL_ORDER *e2);
-void removeEdge(int vIdx1, int vIdx2);
-void resetVertices();
-void handleDeletion();
-void computeGN(int initIdx, int endIdx);
+
 double square (double x); //faster than pow() for doubles
 
 typedef struct {
@@ -42,9 +39,13 @@ typedef struct {
 
 typedef struct {
   int nvertices;     // Number of vertices in network
+  int ncomponents;   // Number of connected components in network
+  int nedges;        // Number of edges in network
   int directed;      // 1 = directed network, 0 = undirected
   VERTEX *vertex;    // Array of VERTEX structs, one for each vertex
 } NETWORK;
+
+void construct_network(NETWORK** network_ptr, double array_list[][3], int num_edges, int num_vertices);
 
 typedef struct VERTEXNODE
 {
@@ -53,4 +54,10 @@ typedef struct VERTEXNODE
 	struct VERTEXNODE *prev;
 } VERTEXNODE;
 
+typedef struct LABELLIST
+{
+    int* labels;
+    struct LABELLIST* next;
+    struct LABELLIST* prev;
+} LABELLIST;
 #endif
